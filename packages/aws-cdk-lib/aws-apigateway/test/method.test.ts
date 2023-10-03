@@ -643,7 +643,7 @@ describe('method', () => {
     const func = new lambda.Function(stack, 'myfunction', {
       handler: 'handler',
       code: lambda.Code.fromInline('foo'),
-      runtime: lambda.Runtime.NODEJS_14_X,
+      runtime: lambda.Runtime.NODEJS_LATEST,
     });
 
     const auth = new apigw.TokenAuthorizer(stack, 'myauthorizer1', {
@@ -906,6 +906,38 @@ describe('method', () => {
     // THEN
     expect(() => method.restApi).toThrow(/not available on Resource not connected to an instance of RestApi/);
     expect(method.api).toBeDefined();
+
+  });
+
+  test('methodResponse should be passed from defaultMethodOptions', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const api = new apigw.RestApi(stack, 'test-api', {
+      cloudWatchRole: false,
+      deploy: false,
+      defaultMethodOptions: {
+        requestParameters: { 'method.request.path.proxy': true },
+        methodResponses: [
+          {
+            statusCode: '200',
+          },
+        ],
+      },
+    });
+
+    // WHEN
+    new apigw.Method(stack, 'method-man', {
+      httpMethod: 'GET',
+      resource: api.root,
+    });
+
+    // THEN
+    Template.fromStack(stack).hasResourceProperties('AWS::ApiGateway::Method', {
+      HttpMethod: 'GET',
+      MethodResponses: [{
+        StatusCode: '200',
+      }],
+    });
 
   });
 

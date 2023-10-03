@@ -64,6 +64,17 @@ describe('bucket', () => {
       'Resources': {
         'MyBucketF68F3FF0': {
           'Type': 'AWS::S3::Bucket',
+          'Properties': {
+            'BucketEncryption': {
+              'ServerSideEncryptionConfiguration': [
+                {
+                  'ServerSideEncryptionByDefault': {
+                    'SSEAlgorithm': 'AES256',
+                  },
+                },
+              ],
+            },
+          },
           'DeletionPolicy': 'Retain',
           'UpdateReplacePolicy': 'Retain',
         },
@@ -340,6 +351,34 @@ describe('bucket', () => {
     });
   });
 
+  test('KMS key is generated if encryption is KMS and no encryptionKey is specified', () => {
+    const stack = new cdk.Stack();
+
+    new s3.Bucket(stack, 'MyBucket', { encryption: s3.BucketEncryption.KMS });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::KMS::Key', {
+      'Description': 'Created by Default/MyBucket',
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::S3::Bucket', {
+      'BucketEncryption': {
+        'ServerSideEncryptionConfiguration': [
+          {
+            'ServerSideEncryptionByDefault': {
+              'KMSMasterKeyID': {
+                'Fn::GetAtt': [
+                  'MyBucketKeyC17130CF',
+                  'Arn',
+                ],
+              },
+              'SSEAlgorithm': 'aws:kms',
+            },
+          },
+        ],
+      },
+    });
+  });
+
   test('enforceSsl can be enabled', () => {
     const stack = new cdk.Stack();
     new s3.Bucket(stack, 'MyBucket', { enforceSSL: true });
@@ -398,6 +437,103 @@ describe('bucket', () => {
         },
       },
     });
+  });
+
+  test('with minimumTLSVersion', () => {
+    const stack = new cdk.Stack();
+    new s3.Bucket(stack, 'MyBucket', {
+      enforceSSL: true,
+      minimumTLSVersion: 1.2,
+    });
+
+    Template.fromStack(stack).hasResourceProperties('AWS::S3::BucketPolicy', {
+      'PolicyDocument': {
+        'Statement': [
+          {
+            'Action': 's3:*',
+            'Condition': {
+              'Bool': {
+                'aws:SecureTransport': 'false',
+              },
+            },
+            'Effect': 'Deny',
+            'Principal': { AWS: '*' },
+            'Resource': [
+              {
+                'Fn::GetAtt': [
+                  'MyBucketF68F3FF0',
+                  'Arn',
+                ],
+              },
+              {
+                'Fn::Join': [
+                  '',
+                  [
+                    {
+                      'Fn::GetAtt': [
+                        'MyBucketF68F3FF0',
+                        'Arn',
+                      ],
+                    },
+                    '/*',
+                  ],
+                ],
+              },
+            ],
+          },
+          {
+            'Action': 's3:*',
+            'Condition': {
+              'NumericLessThan': {
+                's3:TlsVersion': 1.2,
+              },
+            },
+            'Effect': 'Deny',
+            'Principal': { AWS: '*' },
+            'Resource': [
+              {
+                'Fn::GetAtt': [
+                  'MyBucketF68F3FF0',
+                  'Arn',
+                ],
+              },
+              {
+                'Fn::Join': [
+                  '',
+                  [
+                    {
+                      'Fn::GetAtt': [
+                        'MyBucketF68F3FF0',
+                        'Arn',
+                      ],
+                    },
+                    '/*',
+                  ],
+                ],
+              },
+            ],
+          },
+        ],
+        'Version': '2012-10-17',
+      },
+    });
+  });
+
+  test('enforceSSL must be enabled for minimumTLSVersion to work', () => {
+    const stack = new cdk.Stack();
+
+    expect(() => {
+      new s3.Bucket(stack, 'MyBucket1', {
+        enforceSSL: false,
+        minimumTLSVersion: 1.2,
+      });
+    }).toThrow(/'enforceSSL' must be enabled for 'minimumTLSVersion' to be applied/);
+
+    expect(() => {
+      new s3.Bucket(stack, 'MyBucket2', {
+        minimumTLSVersion: 1.2,
+      });
+    }).toThrow(/'enforceSSL' must be enabled for 'minimumTLSVersion' to be applied/);
   });
 
   test.each([s3.BucketEncryption.KMS, s3.BucketEncryption.KMS_MANAGED])('bucketKeyEnabled can be enabled with %p encryption', (encryption) => {
@@ -2554,6 +2690,38 @@ describe('bucket', () => {
       });
 
     });
+    test('adds RedirectRules property with empty keyPrefixEquals condition', () => {
+      const stack = new cdk.Stack();
+      new s3.Bucket(stack, 'Website', {
+        websiteRoutingRules: [{
+          hostName: 'www.example.com',
+          httpRedirectCode: '302',
+          protocol: s3.RedirectProtocol.HTTPS,
+          replaceKey: s3.ReplaceKey.prefixWith('test/'),
+          condition: {
+            httpErrorCodeReturnedEquals: '200',
+            keyPrefixEquals: '',
+          },
+        }],
+      });
+      Template.fromStack(stack).hasResourceProperties('AWS::S3::Bucket', {
+        WebsiteConfiguration: {
+          RoutingRules: [{
+            RedirectRule: {
+              HostName: 'www.example.com',
+              HttpRedirectCode: '302',
+              Protocol: 'https',
+              ReplaceKeyPrefixWith: 'test/',
+            },
+            RoutingRuleCondition: {
+              HttpErrorCodeReturnedEquals: '200',
+              KeyPrefixEquals: '',
+            },
+          }],
+        },
+      });
+
+    });
     test('fails if routingRule condition object is empty', () => {
       const stack = new cdk.Stack();
       expect(() => {
@@ -2651,10 +2819,27 @@ describe('bucket', () => {
   test('if a kms key is specified, it implies bucket is encrypted with kms (dah)', () => {
     // GIVEN
     const stack = new cdk.Stack();
-    const key = new kms.Key(stack, 'k');
-
+    const key = new kms.Key(stack, 'MyKey');
+    // WHEN
+    new s3.Bucket(stack, 'MyBucket', { encryptionKey: key });
     // THEN
-    new s3.Bucket(stack, 'b', { encryptionKey: key });
+    Template.fromStack(stack).hasResourceProperties('AWS::S3::Bucket', {
+      'BucketEncryption': {
+        'ServerSideEncryptionConfiguration': [
+          {
+            'ServerSideEncryptionByDefault': {
+              'KMSMasterKeyID': {
+                'Fn::GetAtt': [
+                  'MyKey6AB29FA6',
+                  'Arn',
+                ],
+              },
+              'SSEAlgorithm': 'aws:kms',
+            },
+          },
+        ],
+      },
+    });
   });
 
   test('Bucket with Server Access Logs', () => {
@@ -3061,6 +3246,7 @@ describe('bucket', () => {
         'Statement': [
           {
             'Action': [
+              's3:PutBucketPolicy',
               's3:GetBucket*',
               's3:List*',
               's3:DeleteObject*',

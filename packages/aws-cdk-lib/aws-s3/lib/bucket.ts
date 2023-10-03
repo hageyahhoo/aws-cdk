@@ -27,7 +27,7 @@ import {
   Token,
   Tokenization,
   Annotations,
-  builtInCustomResourceProviderNodeRuntime,
+  CustomResourceProviderRuntime,
 } from '../../core';
 import { CfnReference } from '../../core/lib/private/cfn-reference';
 import * as cxapi from '../../cx-api';
@@ -1344,18 +1344,18 @@ export interface BucketProps {
    * If you choose KMS, you can specify a KMS key via `encryptionKey`. If
    * encryption key is not specified, a key will automatically be created.
    *
-   * @default - `Kms` if `encryptionKey` is specified, or `Managed` otherwise.
+   * @default - `KMS` if `encryptionKey` is specified, or `UNENCRYPTED` otherwise.
+   * But if `UNENCRYPTED` is specified, the bucket will be encrypted as `S3_MANAGED` automatically.
    */
   readonly encryption?: BucketEncryption;
 
   /**
    * External KMS key to use for bucket encryption.
    *
-   * The 'encryption' property must be either not specified or set to "Kms".
-   * An error will be emitted if encryption is set to "Unencrypted" or
-   * "Managed".
+   * The `encryption` property must be either not specified or set to `KMS` or `DSSE`.
+   * An error will be emitted if `encryption` is set to `UNENCRYPTED` or `S3_MANAGED`.
    *
-   * @default - If encryption is set to "Kms" and this property is undefined,
+   * @default - If `encryption` is set to `KMS` and this property is undefined,
    * a new KMS key will be created and associated with this bucket.
    */
   readonly encryptionKey?: kms.IKey;
@@ -1585,6 +1585,17 @@ export interface BucketProps {
    * @default No Intelligent Tiiering Configurations.
    */
   readonly intelligentTieringConfigurations?: IntelligentTieringConfiguration[];
+
+  /**
+  * Enforces minimum TLS version for requests.
+  *
+  * Requires `enforceSSL` to be enabled.
+  *
+  * @see https://docs.aws.amazon.com/AmazonS3/latest/userguide/amazon-s3-policy-keys.html#example-object-tls-version
+  *
+  * @default No minimum TLS version is enforced.
+  */
+  readonly minimumTLSVersion?: number;
 }
 
 /**
@@ -1879,6 +1890,9 @@ export class Bucket extends BucketBase {
     // Enforce AWS Foundational Security Best Practice
     if (props.enforceSSL) {
       this.enforceSSLStatement();
+      this.minimumTLSVersionStatement(props.minimumTLSVersion);
+    } else if (props.minimumTLSVersion) {
+      throw new Error('\'enforceSSL\' must be enabled for \'minimumTLSVersion\' to be applied');
     }
 
     if (props.serverAccessLogsBucket instanceof Bucket) {
@@ -1893,7 +1907,7 @@ export class Bucket extends BucketBase {
     } else if (props.serverAccessLogsBucket) {
       // A `serverAccessLogsBucket` was provided but it is not a concrete `Bucket` and it
       // may not be possible to configure the ACLs or bucket policy as required.
-      Annotations.of(this).addWarning(
+      Annotations.of(this).addWarningV2('@aws-cdk/aws-s3:accessLogsPolicyNotAdded',
         `Unable to add necessary logging permissions to imported target bucket: ${props.serverAccessLogsBucket}`,
       );
     }
@@ -1971,6 +1985,27 @@ export class Bucket extends BucketBase {
       actions: ['s3:*'],
       conditions: {
         Bool: { 'aws:SecureTransport': 'false' },
+      },
+      effect: iam.Effect.DENY,
+      resources: [
+        this.bucketArn,
+        this.arnForObjects('*'),
+      ],
+      principals: [new iam.AnyPrincipal()],
+    });
+    this.addToResourcePolicy(statement);
+  }
+
+  /**
+   * Adds an iam statement to allow requests with a minimum TLS
+   * version only.
+   */
+  private minimumTLSVersionStatement(minimumTLSVersion?: number) {
+    if (!minimumTLSVersion) return;
+    const statement = new iam.PolicyStatement({
+      actions: ['s3:*'],
+      conditions: {
+        NumericLessThan: { 's3:TlsVersion': minimumTLSVersion },
       },
       effect: iam.Effect.DENY,
       resources: [
@@ -2318,7 +2353,7 @@ export class Bucket extends BucketBase {
     }
 
     const routingRules = props.websiteRoutingRules ? props.websiteRoutingRules.map<CfnBucket.RoutingRuleProperty>((rule) => {
-      if (rule.condition && !rule.condition.httpErrorCodeReturnedEquals && !rule.condition.keyPrefixEquals) {
+      if (rule.condition && rule.condition.httpErrorCodeReturnedEquals == null && rule.condition.keyPrefixEquals == null) {
         throw new Error('The condition property cannot be an empty object');
       }
 
@@ -2427,9 +2462,9 @@ export class Bucket extends BucketBase {
 
   private enableAutoDeleteObjects() {
     const provider = CustomResourceProvider.getOrCreateProvider(this, AUTO_DELETE_OBJECTS_RESOURCE_TYPE, {
-      codeDirectory: path.join(__dirname, '..', '..', 'custom-resource-handlers', 'lib', 'aws-s3', 'auto-delete-objects-handler'),
+      codeDirectory: path.join(__dirname, '..', '..', 'custom-resource-handlers', 'dist', 'aws-s3', 'auto-delete-objects-handler'),
       useCfnResponseWrapper: false,
-      runtime: builtInCustomResourceProviderNodeRuntime(this),
+      runtime: CustomResourceProviderRuntime.NODEJS_18_X,
       description: `Lambda function for auto-deleting objects in ${this.bucketName} S3 bucket.`,
     });
 
@@ -2437,6 +2472,8 @@ export class Bucket extends BucketBase {
     // objects in the bucket
     this.addToResourcePolicy(new iam.PolicyStatement({
       actions: [
+        // prevent further PutObject calls
+        ...perms.BUCKET_PUT_POLICY_ACTIONS,
         // list objects
         ...perms.BUCKET_READ_METADATA_ACTIONS,
         ...perms.BUCKET_DELETE_ACTIONS, // and then delete them

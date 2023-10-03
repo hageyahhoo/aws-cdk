@@ -79,7 +79,7 @@ class LambdaFunctionProvider extends Construct {
     const handler = new CfnResource(this, 'Handler', {
       type: 'AWS::Lambda::Function',
       properties: {
-        Runtime: 'nodejs14.x',
+        Runtime: 'nodejs18.x',
         Code: {
           S3Bucket: asset.bucketName,
           S3Key: asset.objectKey,
@@ -229,16 +229,18 @@ export class AssertionsProvider extends Construct {
     if (!obj) {
       return obj;
     }
-    return JSON.parse(JSON.stringify(obj), (_k, v) => {
-      switch (v) {
-        case true:
-          return 'TRUE:BOOLEAN';
-        case false:
-          return 'FALSE:BOOLEAN';
-        default:
-          return v;
+    return Object.fromEntries(Object.entries(obj).map(([key, value]) => [key, encodeValue(value)]));
+
+    function encodeValue(value: any): any {
+      if (ArrayBuffer.isView(value)) {
+        return {
+          $type: 'ArrayBufferView',
+          string: new TextDecoder().decode(value as Uint8Array),
+        };
       }
-    });
+
+      return JSON.stringify(value);
+    }
   }
 
   /**

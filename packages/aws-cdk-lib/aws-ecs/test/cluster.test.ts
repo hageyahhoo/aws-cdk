@@ -792,7 +792,7 @@ describe('cluster', () => {
     // THEN
     Template.fromStack(stack).hasResourceProperties('AWS::AutoScaling::LaunchConfiguration', {
       ImageId: {
-        Ref: 'SsmParameterValueawsserviceecsoptimizedamiwindowsserver2019englishfullrecommendedimageidC96584B6F00A464EAD1953AFF4B05118Parameter',
+        Ref: 'SsmParameterValueawsserviceamiwindowslatestWindowsServer2019EnglishFullECSOptimizedimageidC96584B6F00A464EAD1953AFF4B05118Parameter',
       },
       InstanceType: 't2.micro',
       IamInstanceProfile: {
@@ -901,9 +901,9 @@ describe('cluster', () => {
     const assembly = app.synth();
     const template = assembly.getStackByName(stack.stackName).template;
     expect(template.Parameters).toEqual({
-      SsmParameterValueawsserviceecsoptimizedamiwindowsserver2019englishfullrecommendedimageidC96584B6F00A464EAD1953AFF4B05118Parameter: {
+      SsmParameterValueawsserviceamiwindowslatestWindowsServer2019EnglishFullECSOptimizedimageidC96584B6F00A464EAD1953AFF4B05118Parameter: {
         Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>',
-        Default: '/aws/service/ecs/optimized-ami/windows_server/2019/english/full/recommended/image_id',
+        Default: '/aws/service/ami-windows-latest/Windows_Server-2019-English-Full-ECS_Optimized/image_id',
       },
     });
 
@@ -982,6 +982,17 @@ describe('cluster', () => {
 
   });
 
+  testDeprecated('allows returning the correct image for linux 2023 for EcsOptimizedAmi', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+    const ami = new ecs.EcsOptimizedAmi({
+      generation: ec2.AmazonLinuxGeneration.AMAZON_LINUX_2023,
+    });
+
+    expect(ami.getImage(stack).osType).toEqual(ec2.OperatingSystemType.LINUX);
+
+  });
+
   test('allows returning the correct image for linux for EcsOptimizedImage', () => {
     // GIVEN
     const stack = new cdk.Stack();
@@ -1005,6 +1016,24 @@ describe('cluster', () => {
     const stack = new cdk.Stack();
 
     expect(ecs.EcsOptimizedImage.amazonLinux2(ecs.AmiHardwareType.ARM).getImage(stack).osType).toEqual(
+      ec2.OperatingSystemType.LINUX);
+
+  });
+
+  test('allows returning the correct image for linux 2023 for EcsOptimizedImage', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+
+    expect(ecs.EcsOptimizedImage.amazonLinux2023().getImage(stack).osType).toEqual(
+      ec2.OperatingSystemType.LINUX);
+
+  });
+
+  test('allows returning the correct image for linux 2023 for EcsOptimizedImage with ARM hardware', () => {
+    // GIVEN
+    const stack = new cdk.Stack();
+
+    expect(ecs.EcsOptimizedImage.amazonLinux2023(ecs.AmiHardwareType.ARM).getImage(stack).osType).toEqual(
       ec2.OperatingSystemType.LINUX);
 
   });
@@ -1135,9 +1164,9 @@ describe('cluster', () => {
     const assembly = app.synth();
     const template = assembly.getStackByName(stack.stackName).template;
     expect(template.Parameters).toEqual({
-      SsmParameterValueawsserviceecsoptimizedamiwindowsserver2019englishfullrecommendedimageidC96584B6F00A464EAD1953AFF4B05118Parameter: {
+      SsmParameterValueawsserviceamiwindowslatestWindowsServer2019EnglishFullECSOptimizedimageidC96584B6F00A464EAD1953AFF4B05118Parameter: {
         Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>',
-        Default: '/aws/service/ecs/optimized-ami/windows_server/2019/english/full/recommended/image_id',
+        Default: '/aws/service/ami-windows-latest/Windows_Server-2019-English-Full-ECS_Optimized/image_id',
       },
     });
 

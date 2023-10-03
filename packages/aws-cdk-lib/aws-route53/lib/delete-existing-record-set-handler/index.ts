@@ -1,4 +1,4 @@
-import { Route53 } from 'aws-sdk'; // eslint-disable-line import/no-extraneous-dependencies
+import { Route53, waitUntilResourceRecordSetsChanged } from '@aws-sdk/client-route-53'; // eslint-disable-line import/no-extraneous-dependencies
 
 interface ResourceProperties {
   HostedZoneId: string;
@@ -14,16 +14,16 @@ export async function handler(event: AWSLambda.CloudFormationCustomResourceEvent
     return;
   }
 
-  const route53 = new Route53({ apiVersion: '2013-04-01' });
+  const route53 = new Route53();
 
   const listResourceRecordSets = await route53.listResourceRecordSets({
     HostedZoneId: resourceProps.HostedZoneId,
     StartRecordName: resourceProps.RecordName,
     StartRecordType: resourceProps.RecordType,
-  }).promise();
+  });
 
   const existingRecord = listResourceRecordSets.ResourceRecordSets
-    .find(r => r.Name === resourceProps.RecordName && r.Type === resourceProps.RecordType);
+    ?.find(r => r.Name === resourceProps.RecordName && r.Type === resourceProps.RecordType);
 
   if (!existingRecord) {
     // There is no existing record, we can safely return
@@ -44,9 +44,9 @@ export async function handler(event: AWSLambda.CloudFormationCustomResourceEvent
         }),
       }],
     },
-  }).promise();
+  });
 
-  await route53.waitFor('resourceRecordSetsChanged', { Id: changeResourceRecordSets.ChangeInfo.Id }).promise();
+  await waitUntilResourceRecordSetsChanged({ client: route53, maxWaitTime: 890 }, { Id: changeResourceRecordSets?.ChangeInfo?.Id });
 
   return {
     PhysicalResourceId: `${existingRecord.Name}-${existingRecord.Type}`,
